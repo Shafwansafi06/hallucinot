@@ -174,7 +174,7 @@ async def _generate_sample(prompt: str, model: str, temperature: float) -> str:
 async def compute_semantic_entropy(
     prompt: str,
     model: str = DEFAULT_PRIMARY_MODEL,
-    n: int = 5,
+    n: int = 2,  # Reduced from 5 to conserve API quota
     cluster_threshold: float = 0.85,
 ) -> tuple[float, str, str]:
     """
@@ -183,11 +183,15 @@ async def compute_semantic_entropy(
     """
     from sklearn.cluster import AgglomerativeClustering
 
-    temperatures = [0.1, 0.3, 0.5, 0.7, 0.9][:n]
-    responses = await asyncio.gather(
-        *[_generate_sample(prompt, model, t) for t in temperatures],
-        return_exceptions=True,
-    )
+    temperatures = [0.1, 0.7][:n]
+    responses = []
+    for t in temperatures:
+        try:
+            r = await _generate_sample(prompt, model, t)
+            responses.append(r)
+            await asyncio.sleep(3)  # avoid burst rate limits
+        except Exception:
+            pass
     valid = [r for r in responses if isinstance(r, str) and len(r.strip()) > 5]
 
     if len(valid) < 2:
@@ -265,11 +269,14 @@ async def adversarial_debate(prompt: str, gemma4_answer: str) -> tuple[float, li
     Critics from different model families adversarially critique Gemma 4's answer.
     Returns (agreement_score, list_of_critiques).
     """
-    critiques = await asyncio.gather(
-        *[_call_critic(m, prompt, gemma4_answer) for m in DEBATE_CRITICS],
-        return_exceptions=True,
-    )
-    critiques = [c for c in critiques if isinstance(c, str) and len(c) > 5]
+    critiques = []
+    for m in DEBATE_CRITICS:
+        try:
+            c = await _call_critic(m, prompt, gemma4_answer)
+            critiques.append(c)
+            await asyncio.sleep(4)
+        except Exception:
+            pass
 
     # Agreement = fraction of critics that found no errors
     no_error_count = sum(1 for c in critiques if "no error" in c.lower() or "no factual" in c.lower())
